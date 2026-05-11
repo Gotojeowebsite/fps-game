@@ -53,19 +53,23 @@ export class Input {
   _key(e, down) {
     if (!this.enabled) return;
     const code = e.code;
-    // Stop browser stealing Tab/Space etc while playing.
-    if (this.locked || down) {
-      const action = this._resolveAction(code);
-      if (action === "scoreboard" || action === "pause" || code === "Tab") e.preventDefault();
-    }
+    const action = this._resolveAction(code);
+    // While in pointer lock (i.e. actively playing) suppress browser defaults
+    // for any bound action key, plus Tab/Space/arrows/letters that the browser
+    // might otherwise hijack (find-as-you-type, scroll, focus change).
+    const isLetter = code.startsWith("Key");
+    const isDigit = code.startsWith("Digit");
+    const isArrow = code.startsWith("Arrow");
+    const isHijack = code === "Space" || code === "Tab" || isArrow || isLetter || isDigit;
+    if (this.locked && (action || isHijack)) e.preventDefault();
+    // Always prevent Tab default to stop focus stealing when menu is open.
+    if (code === "Tab") e.preventDefault();
     if (down) {
       if (this.keys.has(code)) return;
       this.keys.add(code);
-      const action = this._resolveAction(code);
       if (action) { this.actions.add(action); this.actionEdge.add(action); }
     } else {
       this.keys.delete(code);
-      const action = this._resolveAction(code);
       if (action) this.actions.delete(action);
     }
   }

@@ -110,7 +110,18 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .mc-row select { background: #1a212c; color: var(--text); border: 1px solid #303845; padding: 6px 8px; }
 .mc-row button { padding: 8px 12px; background: #1f2630; color: var(--text); border: 1px solid #303845; cursor: pointer; font-family: var(--font); margin-right: 6px; }
 .mc-row button:hover { background: var(--accent2); color: #111; }
-#mc-room { color: var(--accent); font-family: monospace; margin-left: 8px; }
+.mp-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mp-controls input {
+  background: #1a212c; color: var(--accent); border: 1px solid #303845;
+  padding: 8px 10px; font-family: monospace; font-size: 15px; letter-spacing: 4px;
+  text-transform: uppercase; width: 110px; text-align: center;
+}
+.mp-controls input:focus { outline: none; border-color: var(--accent); }
+.mp-status { color: var(--accent); font-family: monospace; margin-left: 6px; font-size: 13px; }
+.mp-status.ok { color: var(--accent2); }
+.mp-status.err { color: var(--danger); }
+.mp-status.wait { color: var(--accent); animation: pulse-mp 1s infinite; }
+@keyframes pulse-mp { 50% { opacity: 0.4; } }
 
 .mc-actions { display: flex; gap: 10px; margin-top: 18px; justify-content: flex-end; }
 .mc-actions button, .actions button {

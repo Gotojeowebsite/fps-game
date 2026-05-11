@@ -136,10 +136,11 @@
         </div>
         <div class="mc-row" id="mc-multi">
           <label>Multiplayer</label>
-          <div>
-            <button id="mc-host">HOST (get code)</button>
-            <button id="mc-join">JOIN (paste code)</button>
-            <span id="mc-room"></span>
+          <div class="mp-controls">
+            <button id="mc-host">HOST</button>
+            <input id="mc-join-code" placeholder="ROOM CODE" maxlength="6" />
+            <button id="mc-join">JOIN</button>
+            <span id="mc-room" class="mp-status"></span>
           </div>
         </div>
         <div class="mc-actions">

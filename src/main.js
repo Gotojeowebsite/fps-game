@@ -19,6 +19,9 @@ import {
   economy, awardMatch, getEquippedSkin, getEquippedCharm, BEAN_SKINS,
 } from "./economy.js";
 import { getEquippedBean, refreshAll as refreshShop } from "./shop.js";
+import { sounds } from "./sounds.js";
+
+sounds.bindUnlock();
 
 const canvas = document.getElementById("game");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
@@ -38,6 +41,9 @@ scene.add(camera);
 
 const input = new Input();
 const net = new Net();
+// Always-on message handler — handles matchstart even before our own match
+// has started, then delegates to handleNetMessage for in-match traffic.
+net.onMessage = (peerId, msg) => handleNetMessage(peerId, msg);
 
 // Loadout: rifle, pistol, sniper, banana, pickaxe
 const LOADOUT = ["rifle", "pistol", "sniper", "banana", "pickaxe"];
@@ -119,6 +125,11 @@ function startMatch(cfg) {
   killStreak = 0; lastKillT = 0;
   damageDirs = [];
 
+  // Clear stale remote-player entries so re-spawning doesn't reference
+  // destroyed Three groups from a previous match (or pre-game lobby).
+  for (const r of remotePlayers.values()) { try { scene.remove(r.group); } catch {} }
+  remotePlayers.clear();
+
   while (scene.children.length > 0) scene.remove(scene.children[0]);
   scene.add(camera);
 
@@ -178,7 +189,7 @@ function startMatch(cfg) {
   hud.setLoadout(LOADOUT);
   hud.setModeInfo(mode.getHudInfo());
 
-  net.onMessage = handleNetMessage;
+  // onMessage stays the same (handleNetMessage); just hook join/leave for HUD.
   net.onPeerJoin = (id) => { toast(`Player joined (${id.slice(0,6)})`); ensureRemotePlayer(id); };
   net.onPeerLeave = (id) => { toast(`Player left`); const r = remotePlayers.get(id); if (r) { scene.remove(r.group); remotePlayers.delete(id); } };
 
@@ -289,8 +300,10 @@ function tick(dt, now) {
     else edit.enter();
   }
 
-  // Reload.
+  // Reload (the actual SFX is fired by the wasReloading edge below).
   if (f.actionEdge.has("reload") && weapon) weapon.startReload();
+  // Jump sound on the keydown edge while grounded.
+  if (f.actionEdge.has("jump") && player.onGround) sounds.jump();
 
   // ADS toggle/hold.
   const canADS = weapon && !build.active;
@@ -319,7 +332,12 @@ function tick(dt, now) {
     build.updateGhost(camera);
     if (f.leftEdge) {
       const placed = build.tryPlace();
-      if (placed) fx.placeBurst(placed.mesh.position.clone(), 0xf2c94c);
+      if (placed) {
+        fx.placeBurst(placed.mesh.position.clone(), 0xf2c94c);
+        sounds.place(placed.mat);
+      } else {
+        sounds.uiClick();
+      }
     }
   } else {
     // Shooting or pickaxe.
@@ -333,7 +351,11 @@ function tick(dt, now) {
     } else if (weapon && player.alive) {
       const canFire = weapon.def.auto ? input.mouse.left : f.leftEdge;
       if (canFire && weapon.tryShoot(now, player.adsing)) {
+        sounds.shoot(weapon.def.id);
         fireBullet(now);
+      } else if (canFire && weapon.mag === 0 && !weapon.reloading) {
+        // dry click — only on the edge, not auto-fire
+        if (f.leftEdge) sounds.uiClick();
       }
       // Harvest by holding E (alternative method).
       if (input.isDown("interact")) {
@@ -348,6 +370,7 @@ function tick(dt, now) {
             if (yld) {
               player.giveMat(yld.kind, yld.amount);
               fx.placeBurst(hit.point, yld.kind === "wood" ? 0xc08a4a : yld.kind === "stone" ? 0xb6b8bb : 0x6ab0e0);
+              sounds.harvest();
             }
           }
         }
@@ -355,6 +378,12 @@ function tick(dt, now) {
     }
   }
 
+  // Detect auto-reload (empty mag → tryShoot triggers reload) and play SFX.
+  if (weapon) {
+    const wasReloading = weapon._sfxReloading || false;
+    if (weapon.reloading && !wasReloading) sounds.reload();
+    weapon._sfxReloading = weapon.reloading;
+  }
   if (weapon) weapon.update(dt, player.adsT);
   if (charm) charm.update(dt);
 
@@ -371,6 +400,7 @@ function tick(dt, now) {
         if (r.target === player) {
           hud?.flashDamage();
           showDamageDir(b.position);
+          sounds.hitTaken();
         }
         const pt = r.target.position.clone(); pt.y += 1.2;
         fx.bloodPuff(pt);
@@ -443,7 +473,10 @@ function quickBuild(kind) {
   build.setActive(true);
   build.updateGhost(camera);
   const placed = build.tryPlace();
-  if (placed) fx.placeBurst(placed.mesh.position.clone(), 0xf2c94c);
+  if (placed) {
+    fx.placeBurst(placed.mesh.position.clone(), 0xf2c94c);
+    sounds.place(placed.mat);
+  }
   // Auto-exit build mode (so user keeps shooting flow).
   build.setActive(false);
   build.kind = prev;
@@ -463,6 +496,7 @@ function pickaxeSwing(now) {
       if (yld) {
         player.giveMat(yld.kind, Math.round(yld.amount * 1.5));
         fx.placeBurst(hit.point, yld.kind === "wood" ? 0xc08a4a : yld.kind === "stone" ? 0xb6b8bb : 0x6ab0e0);
+        sounds.harvest();
       }
     } else {
       // Pickaxe also damages structures lightly.
@@ -510,6 +544,7 @@ function fireBullet(now) {
       const dead = botRef.takeDamage(final);
       fx.bloodPuff(hit.point);
       hud?.showHitmarker(head);
+      sounds.hitmarker(head);
       net.send({ t: "shot", x: muzzle.x, y: muzzle.y, z: muzzle.z, ex: tracerEnd.x, ey: tracerEnd.y, ez: tracerEnd.z });
       if (dead) onKill(player, botRef);
       return;
@@ -541,12 +576,13 @@ function onKill(killer, victim) {
   mode.onKill(killer, victim);
   pushKill(killer.name || "Bot", victim.name || "Bot", killer === player, victim === player);
   if (killer === player) {
+    sounds.kill();
     const now = performance.now() / 1000;
     if (now - lastKillT < 4.5) killStreak++; else killStreak = 1;
     lastKillT = now;
     if (STREAK_LABELS[killStreak]) showStreak(STREAK_LABELS[killStreak]);
   }
-  if (victim === player) { onPlayerDied(); killStreak = 0; }
+  if (victim === player) { sounds.death(); onPlayerDied(); killStreak = 0; }
   else if (!mode || mode.constructor.name !== "BRMode") {
     victim.respawnAt = performance.now() / 1000 + 2.5;
   }
@@ -644,6 +680,11 @@ function setRemoteBean(r, beanId) {
 
 function handleNetMessage(peerId, msg) {
   if (!msg || typeof msg !== "object") return;
+  if (msg.t === "matchstart") {
+    // Host triggered the match. Start ours with their config.
+    if (!api.inMatch) startMatch(msg.cfg);
+    return;
+  }
   if (msg.t === "state") {
     let r = remotePlayers.get(peerId);
     if (!r) { ensureRemotePlayer(peerId); r = remotePlayers.get(peerId); }

@@ -5,6 +5,7 @@ import {
   priceFor, buySkin, buyCharm, openCrate, ownsSkin, ownsCharm,
   equipSkin, equipCharm,
 } from "./economy.js";
+import { sounds } from "./sounds.js";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -128,9 +129,17 @@ function openCrateAnim(crate) {
   if (!result.ok) { flashToast(result.reason); return; }
   lastCrate = crate;
   refreshAll();
+  sounds.uiOpen();
 
   $("#crate-open").classList.remove("hidden");
   $("#crate-result").classList.add("hidden");
+  // Spin ticks.
+  let tickCount = 0;
+  const tickTimer = setInterval(() => {
+    sounds.crateSpin();
+    tickCount++;
+    if (tickCount > 30) clearInterval(tickTimer);
+  }, 130);
 
   // Build a fake spinning strip with random items, ending on the winner.
   const track = $("#crate-track");
@@ -184,6 +193,7 @@ function openCrateAnim(crate) {
     $("#crate-result-name").textContent = label;
     $("#crate-result-dupe").textContent = result.dupe ? `Duplicate — +${result.payout} coins refund` : "Added to inventory";
     r.classList.remove("hidden");
+    sounds.crateReveal(result.rarity);
   }, 4200);
 }
 

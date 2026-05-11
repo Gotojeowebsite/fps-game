@@ -11,6 +11,7 @@ import os, re, sys
 
 ORDER = [
     "settings.js",
+    "sounds.js",
     "economy.js",
     "maps.js",
     "physics.js",

@@ -115,6 +115,200 @@ function keyName(code) {
   return { DEFAULTS, KEYBIND_LABELS, settings, onSettingsChange, saveSettings, resetSettings, keyName };
 })();
 
+// ── sounds.js ──
+G.sounds = (() => {
+  const { settings, onSettingsChange } = G.settings;
+// Procedural Web Audio SFX. No audio files needed — every sound is
+// synthesized in-browser. The AudioContext is lazily created on first
+// user gesture (browser autoplay rules).
+
+class Sounds {
+  constructor() {
+    this.ctx = null;
+    this.master = null;
+    this.sfxGain = null;
+    this.musicGain = null;
+    this._lastStepT = 0;
+    this._unlockBound = false;
+  }
+
+  _ensure() {
+    if (this.ctx) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    this.ctx = new Ctx();
+    this.master = this.ctx.createGain();
+    this.master.connect(this.ctx.destination);
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.connect(this.master);
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.connect(this.master);
+    this._applyVolumes();
+    onSettingsChange(() => this._applyVolumes());
+  }
+
+  _applyVolumes() {
+    if (!this.master) return;
+    this.master.gain.value = settings.volMaster ?? 0.7;
+    this.sfxGain.gain.value = settings.volSfx ?? 0.8;
+    this.musicGain.gain.value = settings.volMusic ?? 0.4;
+  }
+
+  // Most browsers require an explicit user gesture to start audio.
+  unlock() {
+    this._ensure();
+    if (this.ctx && this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
+  }
+  bindUnlock(target = window) {
+    if (this._unlockBound) return;
+    this._unlockBound = true;
+    const fire = () => this.unlock();
+    target.addEventListener("pointerdown", fire);
+    target.addEventListener("keydown", fire);
+  }
+
+  _now() { return this.ctx.currentTime; }
+
+  // Core synth voice: oscillator with exponential pitch + gain envelope.
+  _voice({ freq, freqEnd = null, type = "square", dur = 0.1, attack = 0.005, gain = 0.3, detune = 0 }) {
+    this._ensure();
+    if (!this.ctx) return;
+    const t0 = this._now();
+    const o = this.ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    if (freqEnd) o.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur);
+    if (detune) o.detune.value = detune;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0001, gain), t0 + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g).connect(this.sfxGain);
+    o.start(t0);
+    o.stop(t0 + dur + 0.03);
+  }
+
+  // Filtered noise burst.
+  _noise({ dur = 0.1, gain = 0.25, filterFreq = 2000, filterQ = 0.7, type = "lowpass", attack = 0.002 }) {
+    this._ensure();
+    if (!this.ctx) return;
+    const t0 = this._now();
+    const samples = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, samples, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < samples; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / samples);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = type;
+    filter.frequency.value = filterFreq;
+    filter.Q.value = filterQ;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0001, gain), t0 + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(filter).connect(g).connect(this.sfxGain);
+    src.start(t0);
+  }
+
+  // ─── Public SFX library ──────────────────────────────────
+  shoot(kind = "rifle") {
+    this._ensure(); if (!this.ctx) return;
+    switch (kind) {
+      case "pistol":
+        this._voice({ freq: 340, freqEnd: 90, type: "square", dur: 0.08, gain: 0.28 });
+        this._noise({ dur: 0.06, gain: 0.20, filterFreq: 2400 });
+        break;
+      case "sniper":
+        this._voice({ freq: 180, freqEnd: 50, type: "sawtooth", dur: 0.30, gain: 0.45 });
+        this._noise({ dur: 0.20, gain: 0.35, filterFreq: 1400 });
+        this._voice({ freq: 1200, freqEnd: 200, type: "triangle", dur: 0.10, gain: 0.18 });
+        break;
+      case "banana":
+        this._voice({ freq: 520, freqEnd: 80, type: "triangle", dur: 0.18, gain: 0.30 });
+        this._noise({ dur: 0.10, gain: 0.18, filterFreq: 800 });
+        break;
+      case "rifle":
+      default:
+        this._voice({ freq: 280, freqEnd: 110, type: "square", dur: 0.07, gain: 0.30 });
+        this._noise({ dur: 0.08, gain: 0.25, filterFreq: 1800 });
+        break;
+    }
+  }
+
+  reload() {
+    this._voice({ freq: 600, type: "square", dur: 0.04, gain: 0.18 });
+    setTimeout(() => this._voice({ freq: 420, type: "square", dur: 0.05, gain: 0.18 }), 220);
+    setTimeout(() => this._voice({ freq: 700, type: "square", dur: 0.05, gain: 0.18 }), 700);
+  }
+
+  hitmarker(headshot = false) {
+    this._voice({ freq: headshot ? 1300 : 950, type: "triangle", dur: 0.06, gain: 0.25 });
+  }
+
+  hitTaken() {
+    this._noise({ dur: 0.18, gain: 0.30, filterFreq: 350, type: "lowpass" });
+    this._voice({ freq: 120, freqEnd: 60, type: "sawtooth", dur: 0.15, gain: 0.20 });
+  }
+
+  kill() {
+    this._voice({ freq: 660, type: "triangle", dur: 0.10, gain: 0.30 });
+    setTimeout(() => this._voice({ freq: 990, type: "triangle", dur: 0.12, gain: 0.30 }), 80);
+  }
+
+  death() {
+    this._voice({ freq: 250, freqEnd: 70, type: "sawtooth", dur: 0.5, gain: 0.35 });
+    this._noise({ dur: 0.4, gain: 0.20, filterFreq: 300 });
+  }
+
+  jump() { this._voice({ freq: 480, freqEnd: 620, type: "sine", dur: 0.10, gain: 0.18 }); }
+  land() { this._noise({ dur: 0.12, gain: 0.22, filterFreq: 220 }); }
+
+  place(material = "wood") {
+    if (material === "stone") this._voice({ freq: 220, freqEnd: 160, type: "square", dur: 0.10, gain: 0.30 });
+    else if (material === "metal") {
+      this._voice({ freq: 540, freqEnd: 700, type: "triangle", dur: 0.10, gain: 0.25 });
+      this._voice({ freq: 820, type: "sine", dur: 0.06, gain: 0.18 });
+    } else this._voice({ freq: 330, freqEnd: 240, type: "square", dur: 0.08, gain: 0.25 });
+    this._noise({ dur: 0.06, gain: 0.12, filterFreq: 1200 });
+  }
+
+  harvest() {
+    this._voice({ freq: 220, freqEnd: 380, type: "triangle", dur: 0.08, gain: 0.22 });
+    this._noise({ dur: 0.06, gain: 0.14, filterFreq: 700 });
+  }
+
+  pickup() { this._voice({ freq: 740, freqEnd: 1050, type: "sine", dur: 0.15, gain: 0.22 }); }
+  uiClick() { this._voice({ freq: 820, type: "square", dur: 0.04, gain: 0.18 }); }
+  uiOpen() { this._voice({ freq: 520, freqEnd: 880, type: "triangle", dur: 0.18, gain: 0.22 }); }
+  crateSpin() { this._voice({ freq: 1400, type: "square", dur: 0.02, gain: 0.18 }); }
+
+  crateReveal(rarity = "common") {
+    const map = {
+      common:    [330],
+      uncommon:  [330, 440],
+      rare:      [330, 440, 660],
+      epic:      [330, 440, 660, 880],
+      legendary: [330, 440, 660, 880, 1320],
+    };
+    const notes = map[rarity] || map.common;
+    notes.forEach((f, i) => setTimeout(() => {
+      this._voice({ freq: f, type: "triangle", dur: 0.25, gain: 0.30 });
+    }, i * 90));
+  }
+
+  step() {
+    const now = performance.now() / 1000;
+    if (now - this._lastStepT < 0.32) return;
+    this._lastStepT = now;
+    this._noise({ dur: 0.08, gain: 0.10, filterFreq: 280 });
+  }
+}
+
+const sounds = new Sounds();
+  return { Sounds, sounds };
+})();
+
 // ── economy.js ──
 G.economy = (() => {
 // Currency + inventory + crate roll logic. Persisted in localStorage.
@@ -535,19 +729,23 @@ class Input {
   _key(e, down) {
     if (!this.enabled) return;
     const code = e.code;
-    // Stop browser stealing Tab/Space etc while playing.
-    if (this.locked || down) {
-      const action = this._resolveAction(code);
-      if (action === "scoreboard" || action === "pause" || code === "Tab") e.preventDefault();
-    }
+    const action = this._resolveAction(code);
+    // While in pointer lock (i.e. actively playing) suppress browser defaults
+    // for any bound action key, plus Tab/Space/arrows/letters that the browser
+    // might otherwise hijack (find-as-you-type, scroll, focus change).
+    const isLetter = code.startsWith("Key");
+    const isDigit = code.startsWith("Digit");
+    const isArrow = code.startsWith("Arrow");
+    const isHijack = code === "Space" || code === "Tab" || isArrow || isLetter || isDigit;
+    if (this.locked && (action || isHijack)) e.preventDefault();
+    // Always prevent Tab default to stop focus stealing when menu is open.
+    if (code === "Tab") e.preventDefault();
     if (down) {
       if (this.keys.has(code)) return;
       this.keys.add(code);
-      const action = this._resolveAction(code);
       if (action) { this.actions.add(action); this.actionEdge.add(action); }
     } else {
       this.keys.delete(code);
-      const action = this._resolveAction(code);
       if (action) this.actions.delete(action);
     }
   }
@@ -2843,7 +3041,9 @@ class Player {
 // ── shop.js ──
 G.shop = (() => {
   const { economy, onEconomyChange, getCoins, addCoins, SKINS, CHARMS, BEAN_SKINS, CRATES, RARITY, priceFor, buySkin, buyCharm, openCrate, ownsSkin, ownsCharm, equipSkin, equipCharm } = G.economy;
+  const { sounds } = G.sounds;
 // Shop screen wiring + crate opening animation.
+
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -2967,9 +3167,17 @@ function openCrateAnim(crate) {
   if (!result.ok) { flashToast(result.reason); return; }
   lastCrate = crate;
   refreshAll();
+  sounds.uiOpen();
 
   $("#crate-open").classList.remove("hidden");
   $("#crate-result").classList.add("hidden");
+  // Spin ticks.
+  let tickCount = 0;
+  const tickTimer = setInterval(() => {
+    sounds.crateSpin();
+    tickCount++;
+    if (tickCount > 30) clearInterval(tickTimer);
+  }, 130);
 
   // Build a fake spinning strip with random items, ending on the winner.
   const track = $("#crate-track");
@@ -3023,6 +3231,7 @@ function openCrateAnim(crate) {
     $("#crate-result-name").textContent = label;
     $("#crate-result-dupe").textContent = result.dupe ? `Duplicate — +${result.payout} coins refund` : "Added to inventory";
     r.classList.remove("hidden");
+    sounds.crateReveal(result.rarity);
   }, 4200);
 }
 
@@ -3234,7 +3443,9 @@ G.menu = (() => {
   const { settings, saveSettings, resetSettings, KEYBIND_LABELS, keyName } = G.settings;
   const { MAPS } = G.maps;
   const { initShop } = G.shop;
+  const { sounds } = G.sounds;
 // Menu / settings / mode-select wiring.
+
 
 
 
@@ -3258,7 +3469,7 @@ function hideAllScreens() {
 function initMenus(api) {
   // Top-level menu buttons.
   for (const btn of $$("#menu .menu-buttons button[data-screen]")) {
-    btn.addEventListener("click", () => showScreen(btn.dataset.screen));
+    btn.addEventListener("click", () => { sounds.uiClick(); showScreen(btn.dataset.screen); });
   }
   $("#quit-btn")?.addEventListener("click", () => {
     document.body.innerHTML = "<div style='color:#aaa;font-family:sans-serif;text-align:center;margin-top:40vh'>Thanks for playing.<br><small>Close the tab to exit.</small></div>";
@@ -3320,32 +3531,65 @@ function initModeSelect(api) {
   }
   $("#mc-bots").addEventListener("input", (e) => $("#mc-bots-val").textContent = e.target.value);
 
+  const setMpStatus = (text, cls = "") => {
+    const el = $("#mc-room");
+    el.textContent = text;
+    el.className = "mp-status " + cls;
+  };
+
   $("#mc-host").addEventListener("click", async () => {
-    const code = await api.net.host();
-    multiplayerCfg = { role: "host", code };
-    $("#mc-room").textContent = "ROOM: " + code + " (share)";
-  });
-  $("#mc-join").addEventListener("click", async () => {
-    const code = prompt("Enter room code:");
-    if (!code) return;
+    sounds.uiClick();
+    setMpStatus("Hosting…", "wait");
     try {
-      await api.net.join(code.trim().toUpperCase());
-      multiplayerCfg = { role: "guest", code };
-      $("#mc-room").textContent = "JOINED: " + code;
+      const code = await api.net.host();
+      multiplayerCfg = { role: "host", code };
+      setMpStatus(`ROOM: ${code} — share & wait for friend`, "wait");
+      api.net.onPeerJoin = () => {
+        setMpStatus(`ROOM: ${code} — FRIEND CONNECTED · click START`, "ok");
+        sounds.pickup();
+      };
     } catch (e) {
-      alert("Join failed: " + e.message);
+      setMpStatus("Host failed: " + (e?.type || e?.message || "broker error"), "err");
     }
   });
 
+  const joinCode = $("#mc-join-code");
+  joinCode.addEventListener("input", () => {
+    joinCode.value = joinCode.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  });
+  const doJoin = async () => {
+    const code = joinCode.value.trim().toUpperCase();
+    if (!code || code.length < 4) { setMpStatus("Enter a code (4+ chars)", "err"); return; }
+    sounds.uiClick();
+    setMpStatus(`Connecting to ${code}…`, "wait");
+    try {
+      await api.net.join(code);
+      multiplayerCfg = { role: "guest", code };
+      setMpStatus(`CONNECTED to ${code} — waiting for host to start…`, "ok");
+      sounds.pickup();
+      // Guest auto-starts on host's "matchstart" message (handled in main.js).
+    } catch (e) {
+      setMpStatus("Join failed: " + (e?.type || e?.message || "timeout"), "err");
+    }
+  };
+  $("#mc-join").addEventListener("click", doJoin);
+  joinCode.addEventListener("keydown", (e) => { if (e.key === "Enter") doJoin(); });
+
   $("#mc-start").addEventListener("click", () => {
     if (!selectedMode) return;
-    api.startMatch({
+    sounds.uiClick();
+    const cfg = {
       mode: selectedMode,
       mapId: $("#mc-map").value,
       bots: +$("#mc-bots").value,
       teamSize: +$("#mc-team").value,
       multiplayer: multiplayerCfg,
-    });
+    };
+    // If host, tell guest(s) to start with the same config.
+    if (multiplayerCfg.role === "host" && api.net.peerCount() > 0) {
+      api.net.send({ t: "matchstart", cfg });
+    }
+    api.startMatch(cfg);
   });
 }
 
@@ -3481,6 +3725,7 @@ G.main = (() => {
   const { buildBean, animateBean } = G.beans;
   const { economy, awardMatch, getEquippedSkin, getEquippedCharm, BEAN_SKINS } = G.economy;
   const { getEquippedBean, refreshAll: refreshShop } = G.shop;
+  const { sounds } = G.sounds;
 // Game orchestrator: scene, loop, glue for everything.
 
 
@@ -3500,6 +3745,9 @@ G.main = (() => {
 
 
 
+
+sounds.bindUnlock();
+
 const canvas = document.getElementById("game");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -3518,6 +3766,9 @@ scene.add(camera);
 
 const input = new Input();
 const net = new Net();
+// Always-on message handler — handles matchstart even before our own match
+// has started, then delegates to handleNetMessage for in-match traffic.
+net.onMessage = (peerId, msg) => handleNetMessage(peerId, msg);
 
 // Loadout: rifle, pistol, sniper, banana, pickaxe
 const LOADOUT = ["rifle", "pistol", "sniper", "banana", "pickaxe"];
@@ -3599,6 +3850,11 @@ function startMatch(cfg) {
   killStreak = 0; lastKillT = 0;
   damageDirs = [];
 
+  // Clear stale remote-player entries so re-spawning doesn't reference
+  // destroyed Three groups from a previous match (or pre-game lobby).
+  for (const r of remotePlayers.values()) { try { scene.remove(r.group); } catch {} }
+  remotePlayers.clear();
+
   while (scene.children.length > 0) scene.remove(scene.children[0]);
   scene.add(camera);
 
@@ -3658,7 +3914,7 @@ function startMatch(cfg) {
   hud.setLoadout(LOADOUT);
   hud.setModeInfo(mode.getHudInfo());
 
-  net.onMessage = handleNetMessage;
+  // onMessage stays the same (handleNetMessage); just hook join/leave for HUD.
   net.onPeerJoin = (id) => { toast(`Player joined (${id.slice(0,6)})`); ensureRemotePlayer(id); };
   net.onPeerLeave = (id) => { toast(`Player left`); const r = remotePlayers.get(id); if (r) { scene.remove(r.group); remotePlayers.delete(id); } };
 
@@ -3769,8 +4025,10 @@ function tick(dt, now) {
     else edit.enter();
   }
 
-  // Reload.
+  // Reload (the actual SFX is fired by the wasReloading edge below).
   if (f.actionEdge.has("reload") && weapon) weapon.startReload();
+  // Jump sound on the keydown edge while grounded.
+  if (f.actionEdge.has("jump") && player.onGround) sounds.jump();
 
   // ADS toggle/hold.
   const canADS = weapon && !build.active;
@@ -3799,7 +4057,12 @@ function tick(dt, now) {
     build.updateGhost(camera);
     if (f.leftEdge) {
       const placed = build.tryPlace();
-      if (placed) fx.placeBurst(placed.mesh.position.clone(), 0xf2c94c);
+      if (placed) {
+        fx.placeBurst(placed.mesh.position.clone(), 0xf2c94c);
+        sounds.place(placed.mat);
+      } else {
+        sounds.uiClick();
+      }
     }
   } else {
     // Shooting or pickaxe.
@@ -3813,7 +4076,11 @@ function tick(dt, now) {
     } else if (weapon && player.alive) {
       const canFire = weapon.def.auto ? input.mouse.left : f.leftEdge;
       if (canFire && weapon.tryShoot(now, player.adsing)) {
+        sounds.shoot(weapon.def.id);
         fireBullet(now);
+      } else if (canFire && weapon.mag === 0 && !weapon.reloading) {
+        // dry click — only on the edge, not auto-fire
+        if (f.leftEdge) sounds.uiClick();
       }
       // Harvest by holding E (alternative method).
       if (input.isDown("interact")) {
@@ -3828,6 +4095,7 @@ function tick(dt, now) {
             if (yld) {
               player.giveMat(yld.kind, yld.amount);
               fx.placeBurst(hit.point, yld.kind === "wood" ? 0xc08a4a : yld.kind === "stone" ? 0xb6b8bb : 0x6ab0e0);
+              sounds.harvest();
             }
           }
         }
@@ -3835,6 +4103,12 @@ function tick(dt, now) {
     }
   }
 
+  // Detect auto-reload (empty mag → tryShoot triggers reload) and play SFX.
+  if (weapon) {
+    const wasReloading = weapon._sfxReloading || false;
+    if (weapon.reloading && !wasReloading) sounds.reload();
+    weapon._sfxReloading = weapon.reloading;
+  }
   if (weapon) weapon.update(dt, player.adsT);
   if (charm) charm.update(dt);
 
@@ -3851,6 +4125,7 @@ function tick(dt, now) {
         if (r.target === player) {
           hud?.flashDamage();
           showDamageDir(b.position);
+          sounds.hitTaken();
         }
         const pt = r.target.position.clone(); pt.y += 1.2;
         fx.bloodPuff(pt);
@@ -3923,7 +4198,10 @@ function quickBuild(kind) {
   build.setActive(true);
   build.updateGhost(camera);
   const placed = build.tryPlace();
-  if (placed) fx.placeBurst(placed.mesh.position.clone(), 0xf2c94c);
+  if (placed) {
+    fx.placeBurst(placed.mesh.position.clone(), 0xf2c94c);
+    sounds.place(placed.mat);
+  }
   // Auto-exit build mode (so user keeps shooting flow).
   build.setActive(false);
   build.kind = prev;
@@ -3943,6 +4221,7 @@ function pickaxeSwing(now) {
       if (yld) {
         player.giveMat(yld.kind, Math.round(yld.amount * 1.5));
         fx.placeBurst(hit.point, yld.kind === "wood" ? 0xc08a4a : yld.kind === "stone" ? 0xb6b8bb : 0x6ab0e0);
+        sounds.harvest();
       }
     } else {
       // Pickaxe also damages structures lightly.
@@ -3990,6 +4269,7 @@ function fireBullet(now) {
       const dead = botRef.takeDamage(final);
       fx.bloodPuff(hit.point);
       hud?.showHitmarker(head);
+      sounds.hitmarker(head);
       net.send({ t: "shot", x: muzzle.x, y: muzzle.y, z: muzzle.z, ex: tracerEnd.x, ey: tracerEnd.y, ez: tracerEnd.z });
       if (dead) onKill(player, botRef);
       return;
@@ -4021,12 +4301,13 @@ function onKill(killer, victim) {
   mode.onKill(killer, victim);
   pushKill(killer.name || "Bot", victim.name || "Bot", killer === player, victim === player);
   if (killer === player) {
+    sounds.kill();
     const now = performance.now() / 1000;
     if (now - lastKillT < 4.5) killStreak++; else killStreak = 1;
     lastKillT = now;
     if (STREAK_LABELS[killStreak]) showStreak(STREAK_LABELS[killStreak]);
   }
-  if (victim === player) { onPlayerDied(); killStreak = 0; }
+  if (victim === player) { sounds.death(); onPlayerDied(); killStreak = 0; }
   else if (!mode || mode.constructor.name !== "BRMode") {
     victim.respawnAt = performance.now() / 1000 + 2.5;
   }
@@ -4124,6 +4405,11 @@ function setRemoteBean(r, beanId) {
 
 function handleNetMessage(peerId, msg) {
   if (!msg || typeof msg !== "object") return;
+  if (msg.t === "matchstart") {
+    // Host triggered the match. Start ours with their config.
+    if (!api.inMatch) startMatch(msg.cfg);
+    return;
+  }
   if (msg.t === "state") {
     let r = remotePlayers.get(peerId);
     if (!r) { ensureRemotePlayer(peerId); r = remotePlayers.get(peerId); }

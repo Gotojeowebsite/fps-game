@@ -2,6 +2,7 @@
 import { settings, saveSettings, resetSettings, KEYBIND_LABELS, keyName } from "./settings.js";
 import { MAPS } from "./maps.js";
 import { initShop } from "./shop.js";
+import { sounds } from "./sounds.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -23,7 +24,7 @@ export function hideAllScreens() {
 export function initMenus(api) {
   // Top-level menu buttons.
   for (const btn of $$("#menu .menu-buttons button[data-screen]")) {
-    btn.addEventListener("click", () => showScreen(btn.dataset.screen));
+    btn.addEventListener("click", () => { sounds.uiClick(); showScreen(btn.dataset.screen); });
   }
   $("#quit-btn")?.addEventListener("click", () => {
     document.body.innerHTML = "<div style='color:#aaa;font-family:sans-serif;text-align:center;margin-top:40vh'>Thanks for playing.<br><small>Close the tab to exit.</small></div>";
@@ -85,32 +86,65 @@ function initModeSelect(api) {
   }
   $("#mc-bots").addEventListener("input", (e) => $("#mc-bots-val").textContent = e.target.value);
 
+  const setMpStatus = (text, cls = "") => {
+    const el = $("#mc-room");
+    el.textContent = text;
+    el.className = "mp-status " + cls;
+  };
+
   $("#mc-host").addEventListener("click", async () => {
-    const code = await api.net.host();
-    multiplayerCfg = { role: "host", code };
-    $("#mc-room").textContent = "ROOM: " + code + " (share)";
-  });
-  $("#mc-join").addEventListener("click", async () => {
-    const code = prompt("Enter room code:");
-    if (!code) return;
+    sounds.uiClick();
+    setMpStatus("Hosting…", "wait");
     try {
-      await api.net.join(code.trim().toUpperCase());
-      multiplayerCfg = { role: "guest", code };
-      $("#mc-room").textContent = "JOINED: " + code;
+      const code = await api.net.host();
+      multiplayerCfg = { role: "host", code };
+      setMpStatus(`ROOM: ${code} — share & wait for friend`, "wait");
+      api.net.onPeerJoin = () => {
+        setMpStatus(`ROOM: ${code} — FRIEND CONNECTED · click START`, "ok");
+        sounds.pickup();
+      };
     } catch (e) {
-      alert("Join failed: " + e.message);
+      setMpStatus("Host failed: " + (e?.type || e?.message || "broker error"), "err");
     }
   });
 
+  const joinCode = $("#mc-join-code");
+  joinCode.addEventListener("input", () => {
+    joinCode.value = joinCode.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  });
+  const doJoin = async () => {
+    const code = joinCode.value.trim().toUpperCase();
+    if (!code || code.length < 4) { setMpStatus("Enter a code (4+ chars)", "err"); return; }
+    sounds.uiClick();
+    setMpStatus(`Connecting to ${code}…`, "wait");
+    try {
+      await api.net.join(code);
+      multiplayerCfg = { role: "guest", code };
+      setMpStatus(`CONNECTED to ${code} — waiting for host to start…`, "ok");
+      sounds.pickup();
+      // Guest auto-starts on host's "matchstart" message (handled in main.js).
+    } catch (e) {
+      setMpStatus("Join failed: " + (e?.type || e?.message || "timeout"), "err");
+    }
+  };
+  $("#mc-join").addEventListener("click", doJoin);
+  joinCode.addEventListener("keydown", (e) => { if (e.key === "Enter") doJoin(); });
+
   $("#mc-start").addEventListener("click", () => {
     if (!selectedMode) return;
-    api.startMatch({
+    sounds.uiClick();
+    const cfg = {
       mode: selectedMode,
       mapId: $("#mc-map").value,
       bots: +$("#mc-bots").value,
       teamSize: +$("#mc-team").value,
       multiplayer: multiplayerCfg,
-    });
+    };
+    // If host, tell guest(s) to start with the same config.
+    if (multiplayerCfg.role === "host" && api.net.peerCount() > 0) {
+      api.net.send({ t: "matchstart", cfg });
+    }
+    api.startMatch(cfg);
   });
 }
 
