@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Operation Polygon — FPS</title>
+<link rel="stylesheet" href="./style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<!-- PeerJS for room-code WebRTC multiplayer -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Scope overlay (sniper ADS) -->
+  <div id="scope" class="hidden">
+    <div class="scope-circle">
+      <div class="scope-cross-h"></div>
+      <div class="scope-cross-v"></div>
+      <div class="scope-dot"></div>
+      <div class="scope-tick top"></div>
+      <div class="scope-tick bottom"></div>
+      <div class="scope-tick left"></div>
+      <div class="scope-tick right"></div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="crosshair"><span></span><span></span><span></span><span></span></div>
+    <div id="hitmarker"></div>
+    <div id="damage-vignette"></div>
+    <div id="edit-hint" class="hidden">EDIT MODE — click cells to toggle · click again on apply · G to confirm · Esc to cancel</div>
+
+    <div id="hud-top">
+      <div id="killfeed"></div>
+      <div id="zone-info"></div>
+      <div id="mode-info"></div>
+    </div>
+
+    <div id="hud-bottom">
+      <div id="stats">
+        <div id="health-bar"><div id="health-fill"></div><div id="health-text">100</div></div>
+        <div id="materials">
+          <div class="mat mat-wood" title="Wood (1)"><span class="ico"></span><span class="num">0</span></div>
+          <div class="mat mat-stone" title="Stone (2)"><span class="ico"></span><span class="num">0</span></div>
+          <div class="mat mat-metal" title="Metal (3)"><span class="ico"></span><span class="num">0</span></div>
+        </div>
+        <div id="ammo"><span id="ammo-cur">30</span><span class="slash">/</span><span id="ammo-res">120</span></div>
+      </div>
+      <div id="hotbar"></div>
+    </div>
+
+    <canvas id="minimap" width="180" height="180"></canvas>
+
+    <div id="scoreboard" class="hidden">
+      <h2 id="sb-title">Scoreboard</h2>
+      <div id="sb-rows"></div>
+    </div>
+
+    <div id="build-hint" class="hidden">BUILD MODE — Z wall · X floor · C ramp · 1/2/3 material · click place · Q exit · G edit</div>
+
+    <!-- Damage direction arrows -->
+    <div id="dmg-dirs"></div>
+
+    <!-- Killstreak toast -->
+    <div id="streak" class="hidden"></div>
+  </div>
+
+  <!-- Menus -->
+  <div id="menu" class="screen">
+    <div class="bg-art"></div>
+    <div class="menu-inner">
+      <h1 class="logo">OPERATION <span>POLYGON</span></h1>
+      <p class="tag">Low-poly tactical FPS · build · push · win</p>
+      <div class="menu-buttons">
+        <button data-screen="play">PLAY</button>
+        <button data-screen="loadout">LOADOUT</button>
+        <button data-screen="shop">SHOP</button>
+        <button data-screen="settings">SETTINGS</button>
+        <button data-screen="howto">HOW TO PLAY</button>
+        <button id="quit-btn">QUIT</button>
+      </div>
+      <div class="coin-display" id="coin-display">
+        <span class="coin-icon"></span><span id="coin-val">0</span>
+      </div>
+      <div class="footer">
+        <span>v0.1 · run <code>python3 serve.py</code> locally</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="play" class="screen hidden">
+    <div class="panel">
+      <h2>SELECT MODE</h2>
+      <div class="mode-grid">
+        <div class="mode-card" data-mode="solo">
+          <div class="mode-ico">S</div>
+          <h3>Solo vs Bots</h3>
+          <p>FFA against AI bots. Fight, build, survive.</p>
+        </div>
+        <div class="mode-card" data-mode="duel">
+          <div class="mode-ico">1v1</div>
+          <h3>1v1 Duel</h3>
+          <p>Best of 5. Friend joins by room code.</p>
+        </div>
+        <div class="mode-card" data-mode="tdm">
+          <div class="mode-ico">TDM</div>
+          <h3>Team Deathmatch</h3>
+          <p>2v2 / 3v3 with bots filling empty slots.</p>
+        </div>
+        <div class="mode-card" data-mode="br">
+          <div class="mode-ico">BR</div>
+          <h3>Battle Royale</h3>
+          <p>Shrinking zone. Last one standing.</p>
+        </div>
+      </div>
+
+      <div id="mode-config" class="hidden">
+        <h3 id="mc-title"></h3>
+        <div class="mc-row">
+          <label>Map</label>
+          <select id="mc-map"></select>
+          <span id="mc-map-desc" class="muted small"></span>
+        </div>
+        <div class="mc-row">
+          <label>Bots</label>
+          <input type="range" id="mc-bots" min="0" max="15" step="1" value="5" />
+          <span id="mc-bots-val">5</span>
+        </div>
+        <div class="mc-row" id="mc-team-row">
+          <label>Team size</label>
+          <select id="mc-team"><option value="2">2v2</option><option value="3">3v3</option></select>
+        </div>
+        <div class="mc-row" id="mc-multi">
+          <label>Multiplayer</label>
+          <div>
+            <button id="mc-host">HOST (get code)</button>
+            <button id="mc-join">JOIN (paste code)</button>
+            <span id="mc-room"></span>
+          </div>
+        </div>
+        <div class="mc-actions">
+          <button id="mc-start">START</button>
+          <button class="ghost" data-back="menu">BACK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings" class="screen hidden">
+    <div class="panel">
+      <h2>SETTINGS</h2>
+      <div class="tabs">
+        <button class="tab active" data-tab="gameplay">Gameplay</button>
+        <button class="tab" data-tab="graphics">Graphics</button>
+        <button class="tab" data-tab="audio">Audio</button>
+        <button class="tab" data-tab="keys">Keybinds</button>
+      </div>
+      <div class="tab-panel" data-tabpanel="gameplay">
+        <div class="row"><label>Mouse sensitivity</label><input id="s-sens" type="range" min="0.05" max="3" step="0.05" /><span id="s-sens-val"></span></div>
+        <div class="row"><label>ADS sensitivity multiplier</label><input id="s-adsens" type="range" min="0.2" max="1.5" step="0.05" /><span id="s-adsens-val"></span></div>
+        <div class="row"><label>FOV</label><input id="s-fov" type="range" min="60" max="110" step="1" /><span id="s-fov-val"></span></div>
+        <div class="row"><label>Invert Y</label><input id="s-invy" type="checkbox" /></div>
+        <div class="row"><label>Toggle ADS</label><input id="s-tads" type="checkbox" /></div>
+      </div>
+      <div class="tab-panel hidden" data-tabpanel="graphics">
+        <div class="row"><label>Graphics quality</label>
+          <select id="s-quality">
+            <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
+          </select>
+        </div>
+        <div class="row"><label>Render scale</label><input id="s-rscale" type="range" min="0.5" max="1.5" step="0.05" /><span id="s-rscale-val"></span></div>
+        <div class="row"><label>Shadows</label><input id="s-shadow" type="checkbox" /></div>
+        <div class="row"><label>Particles</label><input id="s-particles" type="checkbox" /></div>
+        <div class="row"><label>Show FPS</label><input id="s-showfps" type="checkbox" /></div>
+      </div>
+      <div class="tab-panel hidden" data-tabpanel="audio">
+        <div class="row"><label>Master</label><input id="s-vol-master" type="range" min="0" max="1" step="0.01" /><span id="s-vol-master-val"></span></div>
+        <div class="row"><label>SFX</label><input id="s-vol-sfx" type="range" min="0" max="1" step="0.01" /><span id="s-vol-sfx-val"></span></div>
+        <div class="row"><label>Music</label><input id="s-vol-music" type="range" min="0" max="1" step="0.01" /><span id="s-vol-music-val"></span></div>
+      </div>
+      <div class="tab-panel hidden" data-tabpanel="keys">
+        <div id="keybinds"></div>
+        <p class="hint">Click a binding then press a key. Esc to cancel.</p>
+      </div>
+      <div class="actions">
+        <button id="s-reset" class="ghost">RESET DEFAULTS</button>
+        <button data-back="auto">DONE</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="shop" class="screen hidden">
+    <div class="panel wide">
+      <div class="panel-head">
+        <h2>SHOP</h2>
+        <div class="coin-display"><span class="coin-icon"></span><span class="coin-val-2">0</span></div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-shoptab="crates">Crates</button>
+        <button class="tab" data-shoptab="skins">Gun Skins</button>
+        <button class="tab" data-shoptab="charms">Charms</button>
+        <button class="tab" data-shoptab="beans">Beans</button>
+      </div>
+      <div class="shop-tab" data-shoppanel="crates">
+        <div id="crates-list" class="crate-grid"></div>
+      </div>
+      <div class="shop-tab hidden" data-shoppanel="skins">
+        <div class="weapon-tabs" id="skin-weapon-tabs"></div>
+        <div id="skins-list" class="item-grid"></div>
+      </div>
+      <div class="shop-tab hidden" data-shoppanel="charms">
+        <div id="charms-list" class="item-grid"></div>
+      </div>
+      <div class="shop-tab hidden" data-shoppanel="beans">
+        <div id="beans-list" class="item-grid"></div>
+      </div>
+      <div class="actions">
+        <button data-back="menu">BACK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="loadout" class="screen hidden">
+    <div class="panel wide">
+      <div class="panel-head">
+        <h2>LOADOUT</h2>
+        <div class="coin-display"><span class="coin-icon"></span><span class="coin-val-2">0</span></div>
+      </div>
+      <p class="muted small">Equip a skin and charm per weapon, and pick your bean character.</p>
+      <div class="weapon-tabs" id="loadout-weapon-tabs"></div>
+      <div id="loadout-content"></div>
+      <h3 class="section-h">BEAN CHARACTER</h3>
+      <div id="loadout-beans" class="item-grid"></div>
+      <div class="actions">
+        <button data-back="menu">BACK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Crate opening overlay -->
+  <div id="crate-open" class="screen hidden">
+    <div class="crate-stage">
+      <div class="crate-spinner">
+        <div class="crate-track" id="crate-track"></div>
+        <div class="crate-marker"></div>
+      </div>
+      <div class="crate-result hidden" id="crate-result">
+        <div class="crate-result-rarity" id="crate-result-rarity">RARE</div>
+        <div class="crate-result-card" id="crate-result-card"></div>
+        <div class="crate-result-name" id="crate-result-name">Item</div>
+        <div class="crate-result-dupe" id="crate-result-dupe"></div>
+        <div class="crate-result-actions">
+          <button id="crate-again">OPEN ANOTHER</button>
+          <button id="crate-done" class="ghost">DONE</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="howto" class="screen hidden">
+    <div class="panel">
+      <h2>HOW TO PLAY</h2>
+      <ul class="howto-list">
+        <li><b>Move</b> — WASD · <b>Jump</b> — Space · <b>Sprint</b> — Shift · <b>Crouch</b> — Ctrl</li>
+        <li><b>Shoot</b> — Left click · <b>Aim / Scope</b> — Right click · <b>Reload</b> — R</li>
+        <li><b>Weapons</b> — 1 Rifle · 2 Pistol · 3 Sniper · 4 Banana · 5 Pickaxe</li>
+        <li><b>Fast build (1v1.lol-style)</b> — Z wall · X floor · C ramp (place instantly). Q toggles build mode for the cursor. 1/2/3 selects wood/stone/metal material while in build.</li>
+        <li><b>Edit</b> — G to enter edit mode on the structure you're aiming at. Click cells to toggle, press G again to confirm.</li>
+        <li><b>Harvest</b> — Hold E (or use pickaxe) on trees, rocks, crates to gather materials.</li>
+        <li><b>Scoreboard</b> — Tab · <b>Menu</b> — Esc</li>
+        <li><b>Multiplayer</b> — Host gets a room code, friends paste it to join. Works peer-to-peer; no server needed.</li>
+        <li><b>Earn coins</b> — Per kill, per match, more for wins. Spend in the Shop on crates, gun skins, charms, and bean characters.</li>
+      </ul>
+      <div class="actions">
+        <button data-back="menu">BACK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pause" class="screen hidden">
+    <div class="panel small">
+      <h2>PAUSED</h2>
+      <button id="resume-btn">RESUME</button>
+      <button id="psettings-btn">SETTINGS</button>
+      <button id="exit-btn">EXIT MATCH</button>
+    </div>
+  </div>
+
+  <div id="endscreen" class="screen hidden">
+    <div class="panel">
+      <h2 id="end-title">VICTORY</h2>
+      <div id="end-stats"></div>
+      <div id="end-rows"></div>
+      <div class="actions">
+        <button id="end-again">PLAY AGAIN</button>
+        <button id="end-menu">MAIN MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+  <div id="fps-counter" class="hidden">0</div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

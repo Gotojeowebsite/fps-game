@@ -1,0 +1,63 @@
+// Map presets. Each map is a palette + prop kit.
+export const MAPS = [
+  {
+    id: "outpost",
+    name: "Outpost",
+    desc: "Verdant forest valley. Trees, rocks, supply crates.",
+    sky: 0x9dc4f0, fogNear: 80, fogFar: 260, fogColor: 0x9dc4f0,
+    sun: 0xfff0d0, hemi: { sky: 0xbfd9ff, ground: 0x4a5c3a, intensity: 0.55 },
+    ground: 0x6b9a4a,
+    cloudColor: 0xffffff,
+    trees: { trunk: 0x5a3a22, leaves: [0x3f7a3a, 0x4f8a48], shape: "ico", count: 90 },
+    rocks: 0x9aa0a6, rockCount: 55,
+    crates: 0xc08a4a, crateCount: 14,
+    barrels: 0x5a6a5a, barrelCount: 18,
+    buildings: 6, buildingWall: 0xd8c79b, buildingRoof: 0x995544,
+  },
+  {
+    id: "dunes",
+    name: "Dunes",
+    desc: "Sun-baked desert with mesas and lonely cacti.",
+    sky: 0xfbd8a0, fogNear: 100, fogFar: 280, fogColor: 0xfbd8a0,
+    sun: 0xffe9b0, hemi: { sky: 0xfbd8a0, ground: 0xc09060, intensity: 0.6 },
+    ground: 0xd9b178,
+    cloudColor: 0xffe8c0,
+    trees: { trunk: 0x4a7036, leaves: [0x60a040, 0x80b850], shape: "cactus", count: 35 },
+    rocks: 0xb89070, rockCount: 65,
+    crates: 0xc0a468, crateCount: 18,
+    barrels: 0x7a5a3a, barrelCount: 12,
+    buildings: 4, buildingWall: 0xd0a070, buildingRoof: 0x884030,
+  },
+  {
+    id: "tundra",
+    name: "Snow Valley",
+    desc: "Frozen valley. Pines, icy boulders, low visibility.",
+    sky: 0xc6dcec, fogNear: 60, fogFar: 200, fogColor: 0xdfe8f0,
+    sun: 0xfffafa, hemi: { sky: 0xeaf3fb, ground: 0xa0b0c0, intensity: 0.7 },
+    ground: 0xeef4f8,
+    cloudColor: 0xffffff,
+    trees: { trunk: 0x5a3a22, leaves: [0x2a5a3a, 0x346f4a], shape: "pine", count: 80 },
+    rocks: 0xd0d8e0, rockCount: 50,
+    crates: 0x8aa0b0, crateCount: 10,
+    barrels: 0x6a7884, barrelCount: 14,
+    buildings: 5, buildingWall: 0xe0e8ee, buildingRoof: 0x506878,
+  },
+  {
+    id: "downtown",
+    name: "Downtown",
+    desc: "Urban grid. Concrete, asphalt, lots of cover.",
+    sky: 0xb0bdc8, fogNear: 80, fogFar: 240, fogColor: 0xb0bdc8,
+    sun: 0xffe8c0, hemi: { sky: 0xc0ccd6, ground: 0x6a6f74, intensity: 0.45 },
+    ground: 0x55595e,
+    cloudColor: 0xdddddd,
+    trees: { trunk: 0x5a3a22, leaves: [0x3a7a4a], shape: "ico", count: 20 },
+    rocks: 0x707880, rockCount: 18,
+    crates: 0xc08a4a, crateCount: 22,
+    barrels: 0x4a5258, barrelCount: 26,
+    buildings: 12, buildingWall: 0x8a8e94, buildingRoof: 0x44484e,
+  },
+];
+
+export function mapById(id) {
+  return MAPS.find(m => m.id === id) || MAPS[0];
+}
