@@ -25,7 +25,12 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = settings.shadows;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Colour space setting — Three.js renamed the API around r152. Support both.
+if ("outputColorSpace" in renderer && THREE.SRGBColorSpace !== undefined) {
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+} else if ("outputEncoding" in renderer && THREE.sRGBEncoding !== undefined) {
+  renderer.outputEncoding = THREE.sRGBEncoding;
+}
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(settings.fov, window.innerWidth / window.innerHeight, 0.1, 600);

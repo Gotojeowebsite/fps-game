@@ -5,16 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <title>Operation Polygon — FPS</title>
 <link rel="stylesheet" href="./style.css" />
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
-<!-- PeerJS for room-code WebRTC multiplayer -->
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- Three.js global UMD build (r149 — last version with a non-module build,
+     so this works when opening index.html directly from the file system). -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<!-- PeerJS for room-code WebRTC multiplayer. -->
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -310,6 +305,6 @@
   <div id="toast" class="hidden"></div>
   <div id="fps-counter" class="hidden">0</div>
 
-  <script type="module" src="./src/main.js"></script>
+  <script src="./game.js"></script>
 </body>
 </html>

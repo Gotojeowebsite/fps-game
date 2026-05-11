@@ -1,5 +1,5 @@
 // Currency + inventory + crate roll logic. Persisted in localStorage.
-const KEY = "op-polygon-economy-v1";
+const ECON_KEY = "op-polygon-economy-v1";
 
 export const RARITY = {
   common:    { name: "Common",    color: 0x9aa3ad, weight: 60, payout: 25 },
@@ -83,7 +83,7 @@ export const CRATES = [
 ];
 
 // ─── State ──────────────────────────────────────────────────
-const DEFAULTS = {
+const ECON_DEFAULTS = {
   coins: 500, // starting kit
   ownedSkins: { pistol: ["ps_default"], rifle: ["rf_default"], sniper: ["sn_default"], banana: ["bn_default"] },
   ownedCharms: ["ch_cube"],
@@ -93,12 +93,12 @@ const DEFAULTS = {
   totals: { matches: 0, kills: 0, wins: 0, cratesOpened: 0 },
 };
 
-function _merge(base, over) {
+function econMerge(base, over) {
   if (!over || typeof over !== "object") return base;
   const out = Array.isArray(base) ? over.slice() : { ...base };
   for (const k of Object.keys(over)) {
     if (over[k] && typeof over[k] === "object" && !Array.isArray(over[k])) {
-      out[k] = _merge(base[k] ?? {}, over[k]);
+      out[k] = econMerge(base[k] ?? {}, over[k]);
     } else { out[k] = over[k]; }
   }
   return out;
@@ -106,34 +106,34 @@ function _merge(base, over) {
 
 export const economy = (() => {
   try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return _merge(JSON.parse(JSON.stringify(DEFAULTS)), JSON.parse(raw));
+    const raw = localStorage.getItem(ECON_KEY);
+    if (raw) return econMerge(JSON.parse(JSON.stringify(ECON_DEFAULTS)), JSON.parse(raw));
   } catch {}
-  return JSON.parse(JSON.stringify(DEFAULTS));
+  return JSON.parse(JSON.stringify(ECON_DEFAULTS));
 })();
 
-const listeners = new Set();
-export function onEconomyChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(economy)); } catch {}
-  for (const fn of listeners) fn(economy);
+const econListeners = new Set();
+export function onEconomyChange(fn) { econListeners.add(fn); return () => econListeners.delete(fn); }
+function econSave() {
+  try { localStorage.setItem(ECON_KEY, JSON.stringify(economy)); } catch {}
+  for (const fn of econListeners) fn(economy);
 }
 
 // ─── API ────────────────────────────────────────────────────
 export function getCoins() { return economy.coins; }
-export function addCoins(n) { economy.coins = Math.max(0, economy.coins + Math.round(n)); save(); }
-export function spendCoins(n) { if (economy.coins < n) return false; economy.coins -= n; save(); return true; }
+export function addCoins(n) { economy.coins = Math.max(0, economy.coins + Math.round(n)); econSave(); }
+export function spendCoins(n) { if (economy.coins < n) return false; economy.coins -= n; econSave(); return true; }
 
 export function ownsSkin(weapon, id) { return (economy.ownedSkins[weapon] || []).includes(id); }
 export function ownsCharm(id) { return (economy.ownedCharms || []).includes(id); }
 
 export function equipSkin(weapon, id) {
   if (!ownsSkin(weapon, id)) return false;
-  economy.equippedSkin[weapon] = id; save(); return true;
+  economy.equippedSkin[weapon] = id; econSave(); return true;
 }
 export function equipCharm(weapon, id) {
   if (id && !ownsCharm(id)) return false;
-  economy.equippedCharm[weapon] = id || null; save(); return true;
+  economy.equippedCharm[weapon] = id || null; econSave(); return true;
 }
 
 export function getEquippedSkin(weapon) {
@@ -152,7 +152,7 @@ export function buySkin(weapon, id) {
   const price = priceFor(def);
   if (!spendCoins(price)) return { ok: false, reason: "Not enough coins" };
   economy.ownedSkins[weapon] = (economy.ownedSkins[weapon] || []).concat([id]);
-  save();
+  econSave();
   return { ok: true, price };
 }
 export function buyCharm(id) {
@@ -162,7 +162,7 @@ export function buyCharm(id) {
   const price = priceFor(def);
   if (!spendCoins(price)) return { ok: false, reason: "Not enough coins" };
   economy.ownedCharms = (economy.ownedCharms || []).concat([id]);
-  save();
+  econSave();
   return { ok: true, price };
 }
 
@@ -208,7 +208,7 @@ export function openCrate(crate) {
   }
   const payout = dupe ? RARITY[rarity].payout : 0;
   if (dupe) addCoins(payout);
-  save();
+  econSave();
   return { ok: true, item: win, rarity, dupe, payout };
 }
 
@@ -219,6 +219,6 @@ export function awardMatch({ kills, won }) {
   economy.totals.matches = (economy.totals.matches || 0) + 1;
   economy.totals.kills = (economy.totals.kills || 0) + kills;
   if (won) economy.totals.wins = (economy.totals.wins || 0) + 1;
-  save();
+  econSave();
   return earned;
 }
